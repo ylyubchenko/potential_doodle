@@ -1,4 +1,6 @@
 /target
 /dist
+/dist-dev
 
 *local.json
+webgpu.gen.html

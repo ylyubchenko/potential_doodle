@@ -1,6 +1,7 @@
 mod names;
 mod params;
 mod rng;
+mod svg;
 
 use bevy::{
     asset::AssetMetaCheck,
@@ -11,6 +12,7 @@ use bevy::{
 };
 
 use params::{CustomParams, Param, ShaderParams};
+use svg::svg_icon;
 
 fn main() {
     App::new()
@@ -37,9 +39,15 @@ fn main() {
             (
                 fit_background,
                 generate_button,
+                copy_result,
+                copy_flash,
+                copy_button_hover,
                 scramble,
                 toggle_settings,
                 spin_icon,
+                github_button,
+                button_cursor,
+                show_adapter_info,
                 adjust_params,
                 reset_params,
                 settings_button_colors,
@@ -106,9 +114,25 @@ struct ResultText;
 #[derive(Component)]
 struct GenerateButton;
 
+/// Marks the copy-to-clipboard button next to the result text.
+#[derive(Component)]
+struct CopyButton;
+
+/// Marks the copy button's icon.
+#[derive(Component)]
+struct CopyLabel;
+
+/// Reverts the copy icon tint after the success flash.
+#[derive(Component)]
+struct CopyFlash(Timer);
+
 /// Marks the settings toggle button (top-left gear).
 #[derive(Component)]
 struct SettingsButton;
+
+/// Marks the GitHub link button next to the gear.
+#[derive(Component)]
+struct GithubButton;
 
 /// Marks the gear icon image inside the settings button.
 #[derive(Component)]
@@ -121,6 +145,15 @@ struct IconSpin(Timer);
 /// Marks the settings panel root.
 #[derive(Component)]
 struct SettingsPanel;
+
+/// Text node showing the GPU adapter name, filled in once the renderer
+/// is up.
+#[derive(Component)]
+struct AdapterNameText;
+
+/// Text node showing the GPU backend, filled in once the renderer is up.
+#[derive(Component)]
+struct AdapterBackendText;
 
 /// A +/- button that nudges one parameter (direction is -1.0 or 1.0).
 #[derive(Component)]
@@ -148,7 +181,7 @@ struct Scramble {
     timer: Timer,
 }
 
-fn setup_ui(mut commands: Commands) {
+fn setup_ui(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands
         .spawn(Node {
             width: Val::Percent(100.0),
@@ -176,12 +209,47 @@ fn setup_ui(mut commands: Commands) {
                     TextFont::from_font_size(24.0),
                     TextColor(Color::srgb(0.92, 0.9, 1.0)),
                 ));
-                panel.spawn((
-                    Text::new("..."),
-                    TextFont::from_font_size(20.0),
-                    TextColor(Color::srgb(0.15, 0.9, 1.0)),
-                    ResultText,
-                ));
+                panel
+                    .spawn(Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new("..."),
+                            TextFont::from_font_size(20.0),
+                            TextColor(Color::srgb(0.15, 0.9, 1.0)),
+                            ResultText,
+                        ));
+                        row.spawn((
+                            Button,
+                            CopyButton,
+                            Node {
+                                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                                position_type: PositionType::Absolute,
+                                right: Val::Px(0.0),
+                                border_radius: BorderRadius::all(Val::Px(6.0)),
+                                ..default()
+                            },
+                        ))
+                        .with_children(|button| {
+                            button.spawn((
+                                ImageNode::new(svg_icon(
+                                    &mut images,
+                                    include_str!("../assets/clipboard-copy.svg"),
+                                )),
+                                Node {
+                                    width: Val::Px(16.0),
+                                    height: Val::Px(16.0),
+                                    ..default()
+                                },
+                                CopyLabel,
+                            ));
+                        });
+                    });
                 panel
                     .spawn((
                         Button,
@@ -206,46 +274,6 @@ fn setup_ui(mut commands: Commands) {
 
 const PANEL_BG: Color = Color::srgba(0.03, 0.0, 0.09, 0.85);
 
-/// Rasterize `assets/settings.svg` (white, 2x for crisp scaling) into a
-/// Bevy image. Bevy has no native SVG support, so the icon is rendered
-/// with resvg at startup.
-fn settings_icon(images: &mut Assets<Image>) -> Handle<Image> {
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-
-    let svg = include_str!("../assets/settings.svg").replace("currentColor", "#ffffff");
-    let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default())
-        .expect("settings.svg parses");
-    let size = 48u32;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size).expect("pixmap");
-    let scale = size as f32 / tree.size().width();
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    // tiny-skia produces premultiplied alpha; Bevy expects straight.
-    let mut data = pixmap.take();
-    for px in data.chunks_exact_mut(4) {
-        let a = px[3] as u32;
-        if a > 0 {
-            px[0] = (px[0] as u32 * 255 / a).min(255) as u8;
-            px[1] = (px[1] as u32 * 255 / a).min(255) as u8;
-            px[2] = (px[2] as u32 * 255 / a).min(255) as u8;
-        }
-    }
-    images.add(Image::new(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        data,
-        TextureFormat::Rgba8UnormSrgb,
-        Default::default(),
-    ))
-}
-
 fn setup_settings_ui(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands
         .spawn((
@@ -266,7 +294,7 @@ fn setup_settings_ui(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
         ))
         .with_children(|button| {
             button.spawn((
-                ImageNode::new(settings_icon(&mut images)),
+                ImageNode::new(svg_icon(&mut images, include_str!("../assets/settings.svg"))),
                 Node {
                     width: Val::Px(22.0),
                     height: Val::Px(22.0),
@@ -274,6 +302,34 @@ fn setup_settings_ui(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
                 },
                 UiTransform::IDENTITY,
                 SettingsIcon,
+            ));
+        });
+
+    commands
+        .spawn((
+            Button,
+            GithubButton,
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Px(12.0),
+                left: Val::Px(60.0),
+                width: Val::Px(40.0),
+                height: Val::Px(40.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(PANEL_BG),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                ImageNode::new(svg_icon(&mut images, include_str!("../assets/github.svg"))),
+                Node {
+                    width: Val::Px(22.0),
+                    height: Val::Px(22.0),
+                    ..default()
+                },
             ));
         });
 
@@ -299,7 +355,39 @@ fn setup_settings_ui(mut commands: Commands, mut images: ResMut<Assets<Image>>) 
         ))
         .with_children(|panel| {
             panel.spawn((
-                Text::new("params"),
+                Text::new("Adapter"),
+                TextFont::from_font_size(15.0),
+                TextColor(Color::srgb(0.92, 0.9, 1.0)),
+                Node {
+                    width: Val::Percent(100.0),
+                    ..default()
+                },
+            ));
+            // Column wrapper so name and backend stack on their own lines
+            // inside the wrap-row panel.
+            panel
+                .spawn(Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|adapter| {
+                    adapter.spawn((
+                        Text::new(""),
+                        TextFont::from_font_size(11.0),
+                        TextColor(Color::srgb(0.7, 0.65, 0.85)),
+                        AdapterNameText,
+                    ));
+                    adapter.spawn((
+                        Text::new(""),
+                        TextFont::from_font_size(11.0),
+                        TextColor(Color::srgb(0.7, 0.65, 0.85)),
+                        AdapterBackendText,
+                    ));
+                });
+            panel.spawn((
+                Text::new("Params"),
                 TextFont::from_font_size(15.0),
                 TextColor(Color::srgb(0.92, 0.9, 1.0)),
                 Node {
@@ -394,6 +482,74 @@ fn adjust_button(row: &mut ChildSpawnerCommands, adjust: ParamAdjust, sign: &str
     });
 }
 
+/// Repository page opened by the GitHub button; single-sourced from the
+/// `repository` field in Cargo.toml.
+const REPO_URL: &str = env!("CARGO_PKG_REPOSITORY");
+
+/// Open the repository page on GitHub button press.
+fn github_button(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<GithubButton>)>,
+) {
+    for interaction in &interactions {
+        if *interaction == Interaction::Pressed {
+            // _self replaces the current tab on wasm; no effect natively.
+            let mut options = webbrowser::BrowserOptions::new();
+            options.with_target_hint("_self");
+            if let Err(error) =
+                webbrowser::open_browser_with_options(webbrowser::Browser::Default, REPO_URL, &options)
+            {
+                warn!("failed to open {REPO_URL}: {error}");
+            }
+        }
+    }
+}
+
+/// Show a pointer cursor while hovering any button.
+fn button_cursor(
+    interactions: Query<&Interaction, With<Button>>,
+    window: Single<Entity, With<Window>>,
+    mut hovering: Local<bool>,
+    mut commands: Commands,
+) {
+    use bevy::window::{CursorIcon, SystemCursorIcon};
+
+    let now_hovering = interactions.iter().any(|i| *i != Interaction::None);
+    if now_hovering != *hovering {
+        *hovering = now_hovering;
+        let icon = if now_hovering {
+            SystemCursorIcon::Pointer
+        } else {
+            SystemCursorIcon::Default
+        };
+        commands.entity(*window).insert(CursorIcon::System(icon));
+    }
+}
+
+/// Fill the adapter lines once the render resources exist (async on wasm).
+fn show_adapter_info(
+    adapter: Option<Res<bevy::render::renderer::RenderAdapterInfo>>,
+    mut names: Query<&mut Text, With<AdapterNameText>>,
+    // Without keeps the two mutable Text queries provably disjoint (B0001).
+    mut backends: Query<&mut Text, (With<AdapterBackendText>, Without<AdapterNameText>)>,
+) {
+    let Some(adapter) = adapter else { return };
+    // Guards so text change detection doesn't fire every frame.
+    for mut name in &mut names {
+        if name.0.is_empty() {
+            name.0 = adapter.name.clone();
+        }
+    }
+    for mut backend in &mut backends {
+        if backend.0.is_empty() {
+            backend.0 = if adapter.driver_info.is_empty() {
+                adapter.backend.to_str().into()
+            } else {
+                adapter.driver_info.clone()
+            };
+        }
+    }
+}
+
 /// Show/hide the settings panel on gear press, and spin the gear.
 fn toggle_settings(
     interactions: Query<&Interaction, (Changed<Interaction>, With<SettingsButton>)>,
@@ -462,11 +618,36 @@ fn adjust_params(
     }
 }
 
+/// Hover feedback for the frameless copy button: brighten the icon,
+/// unless the green success flash is showing.
+fn copy_button_hover(
+    interactions: Query<(&Interaction, &Children), (Changed<Interaction>, With<CopyButton>)>,
+    mut icons: Query<&mut ImageNode, (With<CopyLabel>, Without<CopyFlash>)>,
+) {
+    for (interaction, children) in &interactions {
+        for child in children {
+            if let Ok(mut icon) = icons.get_mut(*child) {
+                icon.color = match interaction {
+                    Interaction::None => Color::WHITE,
+                    _ => Color::srgb(0.15, 0.9, 1.0),
+                };
+            }
+        }
+    }
+}
+
 /// Hover/press feedback for settings-related buttons.
 fn settings_button_colors(
     mut interactions: Query<
         (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<Button>, Without<GenerateButton>, Without<SettingsButton>),
+        (
+            Changed<Interaction>,
+            With<Button>,
+            Without<GenerateButton>,
+            Without<SettingsButton>,
+            Without<GithubButton>,
+            Without<CopyButton>,
+        ),
     >,
 ) {
     for (interaction, mut background) in &mut interactions {
@@ -541,6 +722,55 @@ fn generate_button(
             }
             Interaction::Hovered => *background = BackgroundColor(BUTTON_HOVERED),
             Interaction::None => *background = BackgroundColor(BUTTON_NORMAL),
+        }
+    }
+}
+
+/// Copy the generated name to the clipboard (the scramble target while
+/// the animation is still running), flashing the icon green.
+fn copy_result(
+    interactions: Query<&Interaction, (Changed<Interaction>, With<CopyButton>)>,
+    result: Query<(&Text, Option<&Scramble>), With<ResultText>>,
+    mut icons: Query<(Entity, &mut ImageNode), With<CopyLabel>>,
+    mut clipboard: ResMut<bevy::clipboard::Clipboard>,
+    mut commands: Commands,
+) {
+    for interaction in &interactions {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        for (text, scramble) in &result {
+            let name = scramble
+                .map(|s| s.target.clone())
+                .unwrap_or_else(|| text.0.clone());
+            if name.is_empty() || name == "..." {
+                continue;
+            }
+            match clipboard.set_text(name) {
+                Ok(()) => {
+                    for (entity, mut icon) in &mut icons {
+                        icon.color = Color::srgb(0.3, 1.0, 0.5);
+                        commands
+                            .entity(entity)
+                            .insert(CopyFlash(Timer::from_seconds(1.2, TimerMode::Once)));
+                    }
+                }
+                Err(error) => warn!("clipboard write failed: {error}"),
+            }
+        }
+    }
+}
+
+fn copy_flash(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut CopyFlash, &mut ImageNode)>,
+) {
+    for (entity, mut flash, mut icon) in &mut query {
+        flash.0.tick(time.delta());
+        if flash.0.is_finished() {
+            icon.color = Color::WHITE;
+            commands.entity(entity).remove::<CopyFlash>();
         }
     }
 }

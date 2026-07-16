@@ -14,7 +14,7 @@ struct Params {
     exposure: f32,
     hue_shift: f32,
     anim_time: f32,
-    _pad0: f32,
-    _pad1: f32,
-    _pad2: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
 }

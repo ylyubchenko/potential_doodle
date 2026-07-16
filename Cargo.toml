@@ -2,14 +2,23 @@
 name = "potential_doodle"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/ylyubchenko/potential-doodle"
+
+[workspace]
+members = ["task"]
+
+[features]
+# Wasm backend is a compile-time choice in Bevy: default = WebGL2,
+# --features webgpu = WebGPU (modern limits, but no built-in fallback).
+# `cargo task web` builds both and a loader page picks at runtime.
+webgpu = ["bevy/webgpu"]
 
 [dependencies]
 # Bevy's 2d and ui feature bundles (text, animation, picking included);
 # drops the default 3d and audio stacks.
-# "webgpu" overrides the bundled webgl2 backend on wasm: modern limits and
-# compute support, but requires a WebGPU-capable browser (no fallback).
-bevy = { version = "0.19.0", default-features = false, features = ["2d", "ui", "webgpu"] }
+bevy = { version = "0.19.0", default-features = false, features = ["2d", "ui", "debug"] }
 resvg = { version = "0.47.0", default-features = false }
+webbrowser = "1.2.1"
 
 # Faster iterative builds: light optimization for our code, full for dependencies.
 [profile.dev]

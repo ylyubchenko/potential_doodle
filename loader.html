@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>potential_doodle</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: #111;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            outline: none;
+        }
+    </style>
+</head>
+<body>
+    <script type="module">
+        // Lazy-load the bundle for the best available backend: WebGPU when
+        // a real adapter exists, WebGL2 otherwise. Override with ?r=webgpu
+        // or ?r=webgl2. Built by `cargo task web` with stable (unhashed)
+        // filenames.
+        async function supportsWebGpu() {
+            if (!navigator.gpu) return false;
+            try {
+                return !!(await navigator.gpu.requestAdapter());
+            } catch {
+                return false;
+            }
+        }
+        const forced = new URLSearchParams(location.search).get("r");
+        const dir = ["webgpu", "webgl2"].includes(forced)
+            ? forced
+            : (await supportsWebGpu()) ? "webgpu" : "webgl2";
+        const init = (await import(`./${dir}/potential_doodle.js`)).default;
+        await init({ module_or_path: `./${dir}/potential_doodle_bg.wasm` });
+    </script>
+</body>
+</html>

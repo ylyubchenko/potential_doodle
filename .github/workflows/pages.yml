@@ -19,7 +19,10 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - uses: jetli/trunk-action@v0.5.1
-      - run: trunk build --release --public-url "/${{ github.event.repository.name }}/"
+      # Builds both wasm flavors (WebGL2 + WebGPU) and assembles dist/
+      # with the backend-picking loader. Uses relative URLs, so the
+      # Pages subpath needs no --public-url override.
+      - run: cargo task web
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

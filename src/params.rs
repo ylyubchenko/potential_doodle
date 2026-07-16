@@ -209,7 +209,7 @@ impl CustomParams {
             exposure: self.exposure,
             hue_shift: self.hue_shift,
             anim_time,
-            // Padding fields (WebGL2 16-byte alignment) stay zero.
+            // Padding fields (WebGL2 16-byte size rule) stay zero.
             ..Default::default()
         }
     }
