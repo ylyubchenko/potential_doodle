@@ -53,8 +53,23 @@ fn run(program: &str, args: &[&str]) -> TaskResult {
 /// but trunk copies assets/ in parallel with that build — so a trunk-built
 /// dist would always carry the previous build's generated file. Running
 /// codegen up front keeps assets/ current before trunk starts.
+///
+/// Checks the wasm target: build scripts run on the host either way, and
+/// this avoids Bevy's native-only system deps (wayland etc.) on CI
+/// runners. --release shares the dependency cache with the trunk builds.
 fn prime_codegen() -> TaskResult {
-    run("cargo", &["check", "-p", "potential_doodle", "--quiet"])
+    run(
+        "cargo",
+        &[
+            "check",
+            "-p",
+            "potential_doodle",
+            "--release",
+            "--target",
+            "wasm32-unknown-unknown",
+            "--quiet",
+        ],
+    )
 }
 
 /// Write the WebGPU trunk template, derived from app.html — the only
