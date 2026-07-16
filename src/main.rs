@@ -1,5 +1,6 @@
 mod names;
 mod params;
+mod rng;
 
 use bevy::{
     asset::AssetMetaCheck,
@@ -565,16 +566,14 @@ fn scramble(
         // Quantize the seed so glyphs only switch every some ms instead of
         // every frame.
         let interval = (params.scramble_interval_ms as u64).max(1);
-        let mut rng = (time.elapsed().as_millis() as u64 / interval) | 1;
+        let mut rng = rng::Rng::new(time.elapsed().as_millis() as u64 / interval);
         let mut out = String::with_capacity(chars.len());
         for (i, c) in chars.iter().enumerate() {
-            rng = rng
-                .wrapping_mul(6364_1362_2384_6793_005)
-                .wrapping_add(1442_6950_4088_8963_407);
+            let glyph = *rng.pick(GLYPHS) as char;
             if i < revealed {
                 out.push(*c);
             } else {
-                out.push(GLYPHS[(rng >> 33) as usize % GLYPHS.len()] as char);
+                out.push(glyph);
             }
         }
         text.0 = out;

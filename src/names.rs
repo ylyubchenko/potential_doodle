@@ -5,6 +5,8 @@
 //! that generates a handful of candidates and keeps the best one
 //! (favoring alliteration and a comfortable length).
 
+use crate::rng::Rng;
+
 const ADJECTIVES: &[&str] = &[
     "neon", "retro", "hyper", "chrome", "vapor", "turbo", "cosmic", "laser",
     "midnight", "electric", "crystal", "phantom", "analog", "infinite",
@@ -32,28 +34,6 @@ const GERUNDS: &[&str] = &[
     "gliding", "glowing", "howling", "racing", "rising", "roaming",
     "shifting", "shimmering", "spinning", "surfing", "wandering", "waning",
 ];
-
-/// Tiny SplitMix64 PRNG: deterministic per seed, no dependencies.
-pub struct Rng(u64);
-
-impl Rng {
-    pub fn new(seed: u64) -> Self {
-        Self(seed ^ 0x9E37_79B9_7F4A_7C15)
-    }
-
-    pub fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^ (z >> 31)
-    }
-
-    /// Uniformly pick one entry from a word list.
-    pub fn pick<'a>(&mut self, list: &[&'a str]) -> &'a str {
-        list[(self.next() % list.len() as u64) as usize]
-    }
-}
 
 /// Name pattern selector: 0 = any, 1 = adjective-noun, 2 = gerund-noun,
 /// 3 = noun-noun.
@@ -91,9 +71,9 @@ fn candidate(rng: &mut Rng, style: u8) -> (&'static str, &'static str) {
         },
     };
     match pattern {
-        1 => (rng.pick(ADJECTIVES), rng.pick(NOUNS)),
-        2 => (rng.pick(GERUNDS), rng.pick(NOUNS)),
-        _ => (rng.pick(NOUNS), rng.pick(NOUNS)),
+        1 => (*rng.pick(ADJECTIVES), *rng.pick(NOUNS)),
+        2 => (*rng.pick(GERUNDS), *rng.pick(NOUNS)),
+        _ => (*rng.pick(NOUNS), *rng.pick(NOUNS)),
     }
 }
 
