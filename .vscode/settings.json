@@ -1,0 +1,4 @@
+{
+  "recommendations": ["antalt.shader-validator"],
+  "shader-validator.wgsl.enabled": false
+}

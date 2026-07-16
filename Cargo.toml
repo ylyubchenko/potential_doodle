@@ -7,6 +7,7 @@ edition = "2024"
 # Bevy's 2d and ui feature bundles (text, animation, picking included);
 # drops the default 3d and audio stacks.
 bevy = { version = "0.19.0", default-features = false, features = ["2d", "ui"] }
+resvg = { version = "0.47.0", default-features = false }
 
 # Faster iterative builds: light optimization for our code, full for dependencies.
 [profile.dev]
