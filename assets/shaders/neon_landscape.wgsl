@@ -1,0 +1,176 @@
+// Animated synthwave landscape: striped sun, parallax mountain ridges and a
+// scrolling perspective grid, rendered on a fullscreen quad behind the scene.
+
+#import bevy_sprite::{
+    mesh2d_vertex_output::VertexOutput,
+    mesh2d_view_bindings::{view, globals},
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> tint: vec4<f32>;
+
+const HORIZON: f32 = -0.08;
+const MAGENTA: vec3<f32> = vec3<f32>(1.0, 0.15, 0.8);
+const CYAN: vec3<f32> = vec3<f32>(0.15, 0.9, 1.0);
+
+const PI: f32 = 3.141592654;
+const TAU: f32 = 6.283185307;
+const STAR_LAYERS: f32 = 5.0;
+
+fn hash2(p_in: vec2<f32>) -> vec2<f32> {
+    let p = vec2<f32>(dot(p_in, vec2<f32>(127.1, 311.7)), dot(p_in, vec2<f32>(269.5, 183.3)));
+    return fract(sin(p) * 43758.5453123);
+}
+
+// Star color from temperature (Kelvin).
+fn blackbody(temp: f32) -> vec3<f32> {
+    var col = vec3<f32>(255.0);
+    col.x = 56100000.0 * pow(temp, -3.0 / 2.0) + 148.0;
+    col.y = 100.04 * log(temp) - 623.6;
+    if (temp > 6500.0) {
+        col.y = 35200000.0 * pow(temp, -3.0 / 2.0) + 184.0;
+    }
+    col.z = 194.18 * log(temp) - 1448.6;
+    col = clamp(col, vec3<f32>(0.0), vec3<f32>(255.0)) / 255.0;
+    if (temp < 1000.0) {
+        col = col * temp / 1000.0;
+    }
+    return col;
+}
+
+fn stars(sp: vec2<f32>, t: f32) -> vec3<f32> {
+    var col = vec3<f32>(0.0);
+    let y = sin(sp.x);
+    for (var i: f32 = 0.0; i < STAR_LAYERS; i = i + 1.0) {
+        var pp = sp + 0.5 * i;
+        let s = i / (STAR_LAYERS - 1.0);
+        let dim = vec2<f32>(mix(0.05, 0.003, s) * PI);
+        // Floor-mod cell repeat (GLSL mod2).
+        let q = pp + dim * 0.5;
+        let np = floor(q / dim);
+        pp = q - dim * np - dim * 0.5;
+        let h = hash2(np + 127.0 + i);
+        let o = -1.0 + 2.0 * h;
+        pp = pp + o * dim * 0.5;
+        pp.y = pp.y * y;
+        let l = length(pp);
+        let h1 = fract(h.x * 1667.0);
+        let h2 = fract(h.x * 1887.0);
+        let h3 = fract(h.x * 2997.0);
+        let scol = mix(8.0 * h2, 0.25 * h2 * h2, s) * blackbody(mix(3000.0, 22000.0, h1 * h1));
+        var ccol = col + exp(-(6000.0 / mix(2.0, 0.25, s)) * max(l - 0.001, 0.0)) * scol;
+        ccol = ccol * mix(0.125, 1.0, 1.0 - smoothstep(0.99, 1.0, sin(0.25 * t + TAU * h.y)));
+        col = select(col, ccol, h3 < y);
+    }
+    return col;
+}
+
+// License: Unknown, author: Matt Taylor (https://github.com/64),
+// found: https://64.github.io/tonemapping/
+fn aces_approx(v_in: vec3<f32>) -> vec3<f32> {
+    let v = max(v_in, vec3<f32>(0.0)) * 0.6;
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp((v * (a * v + b)) / (v * (c * v + d) + e), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// Scene color at centered, aspect-scaled coordinates (y up).
+fn scene(p: vec2<f32>, t: f32) -> vec3<f32> {
+    var col = vec3<f32>(0.0);
+
+    let sun_pos = vec2<f32>(0.0, HORIZON + 0.16);
+    let sun_r = 0.17;
+
+    if (p.y > HORIZON) {
+        // Sky gradient: deep violet at the horizon fading to near-black.
+        let sky_t = clamp((p.y - HORIZON) * 2.2, 0.0, 1.0);
+        col = mix(vec3<f32>(0.16, 0.02, 0.22), vec3<f32>(0.01, 0.0, 0.04), sky_t);
+
+        // Layered starfield: map the flat sky to pseudo-spherical coords
+        // (theta from vertical, phi horizontal) as the original expects.
+        let ssp = vec2<f32>(PI * 0.5 - (p.y - HORIZON), p.x);
+        col = col + stars(ssp, t) * sky_t;
+
+        // Sun disc with animated horizontal cuts, yellow on top, pink below.
+        let d = length(p - sun_pos);
+        let sun_grad = clamp((sun_pos.y + sun_r - p.y) / (2.0 * sun_r), 0.0, 1.0);
+        let sun_col = mix(vec3<f32>(1.0, 0.85, 0.25), vec3<f32>(1.0, 0.1, 0.55), sun_grad);
+        var disc = smoothstep(0.006, -0.006, d - sun_r);
+        let gap = clamp((sun_pos.y + 0.05 - p.y) * 2.6, 0.0, 0.6);
+        // Pixel-coverage stripes: dim by how much of the pixel the gap
+        // covers, so sub-pixel gaps fade in instead of flickering.
+        let band = p.y * 40.0 + t * 0.6;
+        let aa = max(fwidth(band), 1e-4);
+        // Wrapped distance (in band periods) to the nearest gap center.
+        let dg = 0.5 - abs(fract(band - gap * 0.5) - 0.5);
+        let stripe = 1.0 - clamp((gap * 0.5 - dg) / aa + 0.5, 0.0, 1.0);
+        disc = disc * stripe;
+        col = mix(col, sun_col, disc);
+        // Sun glow.
+        col = col + vec3<f32>(1.0, 0.2, 0.5) * exp(-d * 7.0) * 0.45;
+
+    } else {
+        // Perspective grid scrolling toward the camera.
+        let depth = HORIZON - p.y;
+        let z = 1.0 / max(depth, 1e-4);
+        let wx = p.x * z * 0.7;
+        let wz = z * 0.7 + t * 1.4;
+
+        col = vec3<f32>(0.05, 0.0, 0.09);
+        // Sun reflection: rippling shimmer that follows the sun and scrolls
+        // with the grid, with a slow intensity flicker.
+        let ripple = (sin(wz * 1.7 + t * 2.0) + 0.6 * sin(wz * 4.3 - t * 3.1)) * 0.02;
+        let refl = exp(-abs(p.x - sun_pos.x + ripple) * 8.0) * exp(-depth * 4.0);
+        let flicker = 0.85 + 0.25 * sin(t * 2.3 + depth * 14.0);
+        col = col + vec3<f32>(0.5, 0.05, 0.3) * refl * flicker;
+
+        let lx = abs(fract(wx + 0.5) - 0.5) / max(fwidth(wx), 1e-4);
+        let lz = abs(fract(wz + 0.5) - 0.5) / max(fwidth(wz), 1e-4);
+        let line = max(exp(-lx * 0.7), exp(-lz * 0.7));
+        // Fade the grid out approaching the horizon; lines run pink near
+        // the sun down to blue at the bottom of the screen.
+        let fade = clamp(depth * 5.0, 0.0, 1.0);
+        let grid_col = mix(MAGENTA, vec3<f32>(0.25, 0.4, 1.0), clamp(depth * 2.4, 0.0, 1.0));
+        col = mix(col, grid_col, line * fade * 0.9);
+    }
+
+    // Horizon glow: a bright band along the horizon line on both sides,
+    // strongest under the sun.
+    let glow_str = 0.35 + 0.45 * exp(-abs(p.x - sun_pos.x) * 2.0);
+    col = col + vec3<f32>(1.0, 0.35, 0.75) * exp(-abs(p.y - HORIZON) * 16.0) * glow_str;
+
+    return col;
+}
+
+@fragment
+fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+    let t = globals.time;
+    let aspect = view.viewport.z / view.viewport.w;
+    // Centered coordinates, y up.
+    var q = vec2<f32>(in.uv.x - 0.5, 0.5 - in.uv.y);
+
+    // CRT barrel distortion: stretch grows quadratically toward the edges.
+    let rsq = dot(q, q);
+    q = q * (1.0 + 0.12 * rsq);
+
+    let p = vec2<f32>(q.x * aspect, q.y);
+
+    // Chromatic aberration: red and blue sample the scene at slightly
+    // different magnifications, diverging toward the screen edges.
+    let ca = 0.006 * rsq;
+    var col = vec3<f32>(0.0);
+    col.r = scene(p * (1.0 + ca), t).r;
+    col.g = scene(p, t).g;
+    col.b = scene(p * (1.0 - ca), t).b;
+
+    // Subtle scanlines and vignette for the retro CRT feel.
+    col = col * (0.94 + 0.06 * sin(in.uv.y * view.viewport.w * 1.8));
+    col = col * (1.0 - 0.35 * dot(p, p));
+
+    // Filmic rolloff: pre-boost, then ACES so glows saturate smoothly.
+    col = aces_approx(col * 1.5);
+
+    return vec4<f32>(col * tint.rgb, 1.0);
+}
