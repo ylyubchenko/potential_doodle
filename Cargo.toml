@@ -6,7 +6,9 @@ edition = "2024"
 [dependencies]
 # Bevy's 2d and ui feature bundles (text, animation, picking included);
 # drops the default 3d and audio stacks.
-bevy = { version = "0.19.0", default-features = false, features = ["2d", "ui"] }
+# "webgpu" overrides the bundled webgl2 backend on wasm: modern limits and
+# compute support, but requires a WebGPU-capable browser (no fallback).
+bevy = { version = "0.19.0", default-features = false, features = ["2d", "ui", "webgpu"] }
 resvg = { version = "0.47.0", default-features = false }
 
 # Faster iterative builds: light optimization for our code, full for dependencies.

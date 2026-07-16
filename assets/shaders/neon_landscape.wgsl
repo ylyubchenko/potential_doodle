@@ -93,6 +93,18 @@ fn scene(p: vec2<f32>, t: f32) -> vec3<f32> {
     let sun_pos = vec2<f32>(0.0, horizon + params.sun_height);
     let sun_r = params.sun_radius;
 
+    // Derivatives (fwidth) must be computed in uniform control flow —
+    // WebGPU rejects them inside the sky/ground branches below, so
+    // everything derivative-dependent is hoisted up here.
+    let band = p.y * params.sun_stripes + t * 0.6;
+    let band_aa = max(fwidth(band), 1e-4);
+    let depth = horizon - p.y;
+    let z = 1.0 / max(depth, 1e-4);
+    let wx = p.x * z * params.grid_scale;
+    let wz = z * params.grid_scale + t * params.grid_speed;
+    let wx_aa = max(fwidth(wx), 1e-4);
+    let wz_aa = max(fwidth(wz), 1e-4);
+
     if (p.y > horizon) {
         // Sky gradient: deep violet at the horizon fading to near-black.
         let sky_t = clamp((p.y - horizon) * 2.2, 0.0, 1.0);
@@ -111,11 +123,9 @@ fn scene(p: vec2<f32>, t: f32) -> vec3<f32> {
         let gap = clamp((sun_pos.y + 0.05 - p.y) * 2.6, 0.0, 0.6);
         // Pixel-coverage stripes: dim by how much of the pixel the gap
         // covers, so sub-pixel gaps fade in instead of flickering.
-        let band = p.y * params.sun_stripes + t * 0.6;
-        let aa = max(fwidth(band), 1e-4);
         // Wrapped distance (in band periods) to the nearest gap center.
         let dg = 0.5 - abs(fract(band - gap * 0.5) - 0.5);
-        let stripe = 1.0 - clamp((gap * 0.5 - dg) / aa + 0.5, 0.0, 1.0);
+        let stripe = 1.0 - clamp((gap * 0.5 - dg) / band_aa + 0.5, 0.0, 1.0);
         disc = disc * stripe;
         col = mix(col, sun_col, disc);
         // Sun glow.
@@ -123,11 +133,6 @@ fn scene(p: vec2<f32>, t: f32) -> vec3<f32> {
 
     } else {
         // Perspective grid scrolling toward the camera.
-        let depth = horizon - p.y;
-        let z = 1.0 / max(depth, 1e-4);
-        let wx = p.x * z * params.grid_scale;
-        let wz = z * params.grid_scale + t * params.grid_speed;
-
         col = vec3<f32>(0.05, 0.0, 0.09);
         // Sun reflection: rippling shimmer that follows the sun and scrolls
         // with the grid, with a slow intensity flicker.
@@ -136,8 +141,8 @@ fn scene(p: vec2<f32>, t: f32) -> vec3<f32> {
         let flicker = 0.85 + 0.25 * sin(t * 2.3 + depth * 14.0);
         col = col + vec3<f32>(0.5, 0.05, 0.3) * refl * flicker;
 
-        let lx = abs(fract(wx + 0.5) - 0.5) / max(fwidth(wx), 1e-4);
-        let lz = abs(fract(wz + 0.5) - 0.5) / max(fwidth(wz), 1e-4);
+        let lx = abs(fract(wx + 0.5) - 0.5) / wx_aa;
+        let lz = abs(fract(wz + 0.5) - 0.5) / wz_aa;
         let line = max(exp(-lx * 0.7), exp(-lz * 0.7));
         // Fade the grid out approaching the horizon; lines run pink near
         // the sun down to blue at the bottom of the screen.
